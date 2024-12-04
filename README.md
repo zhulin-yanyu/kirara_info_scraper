@@ -1,5 +1,6 @@
 ## kirara_info_scraper
 从 http://www.dokidokivisual.com/ 爬取Kirara系列的杂志与单行本信息。
+作者：竹林烟雨，QQ：1823072832
 
 ## 如何使用
 函数 search_old_comics 爬取 “既刊ラインナップ” 的信息，填入的值为网页上的参数，会爬取这一页的单行本信息。
