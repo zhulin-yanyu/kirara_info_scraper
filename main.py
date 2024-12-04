@@ -1,5 +1,5 @@
 from urllib.parse import quote
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from datetime import datetime
 import requests
 import time
@@ -201,11 +201,10 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
         if resp:
             resp_text = resp.text
             bs = BeautifulSoup(resp_text, 'html.parser')
-            # 杂志名称
 
             photo = bs.find('div', class_='photo')
-            img = photo.find('img') # type: ignore
-            magazine_name = img.attrs['alt'] # type: ignore
+            img = photo.find('img') # 杂志封面 # type: ignore
+            magazine_name = img.attrs['alt'] # 杂志名称 # type: ignore
             img_src = img.attrs['src'] # type: ignore
 
             month_match = re.search(r'.*?(\d{2})(\d{2}).*?', img_src)
@@ -215,6 +214,56 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
 
             comics_msg = photo.find('ul', class_='lineup') # type: ignore
             comics = comics_msg.find_all('li') # type: ignore
+
+            # 获取右侧的细致信息
+            info = photo.find_next_sibling('div', class_='info') # type: ignore
+            info_comics = list()
+            if isinstance(info, Tag):
+                if info and '◆◆' in info.text:
+                    sections = info.find_all(string=re.compile(r"◆◆.*?◆◆"))
+                    for section in sections:
+                        strong = section.find_next()
+                        section_match = re.search(r'◆◆(.+)◆◆', section.text)
+                        tags = section_match.group(1) # type: ignore
+                        while strong:
+                            if strong.name == 'strong' and '◆' not in strong.text:
+                                title_match = re.search(r'[「|『](.+)[」|』]', strong.text)
+                                title = title_match.group(1) # type: ignore
+                                info_comics.append((tags, title))
+                            try:
+                                next_sibling_str = strong.next_sibling.get_text(strip=True)
+                            except:
+                                next_sibling_str = ''
+                            strong = strong.find_next()
+                            if re.search(r"◆◆.*?◆◆", next_sibling_str):
+                                break
+                            if not strong or strong.find_parent('div', class_='info') != info:
+                                break
+                elif info and info.find_all('u'):
+                    sections = info.find_all('u')
+
+                    for s in range(len(sections)):
+                        previous_br = sections[s].find_previous()
+                        next_br = sections[s].find_next()
+                        next_u = next_br.find_next() if next_br and next_br.name == 'br' else None
+                        previous_u = previous_br.find_previous() if previous_br and previous_br.name == 'br' else None
+                        if next_u and next_u.name == 'u':
+                            continue
+                        elif previous_u and previous_u.name == 'u':
+                            tags = f'{sections[s-1].get_text(strip=True)}\n{sections[s].get_text(strip=True)}'
+                        else:
+                            tags = sections[s].get_text(strip=True)
+                        strong = sections[s].find_next()
+                        while strong:
+                            if strong.name == 'strong':
+                                title_match = re.search(r'[「|『](.+)[」|』]', strong.text)
+                                title = title_match.group(1) # type: ignore
+                                info_comics.append((tags, title))
+                            strong = strong.find_next()
+                            if strong.name == 'u':
+                                break
+                            if not strong or strong.find_parent('div', class_='info') != info:
+                                break
 
             comic_list = list()
             if comics:
@@ -241,7 +290,7 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
                                 '作者': author
                             })
 
-
+            comic_list = put_tags_by_magazine(comic_list, info_comics)
             result_dict[i+1] = {
                 '杂志名称': magazine_name,
                 '杂志封面': f'{base_url}{img_src}',
@@ -249,6 +298,30 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
                 '连载作品': comic_list
                 }
     return result_dict
+
+def put_tags_by_magazine(comic_list, tag_list):
+    # 处理杂志的刊载信息，为作品打上标签
+    tag_cn_dict = {
+        '表紙': '封面',
+        '巻頭カラー': '卷头彩页',
+        'ゲスト': '客串',
+        '読み切り': '读切',
+        'センターカラー': '卷中彩页'
+        }
+
+    for comic in comic_list:
+        for tag, title in tag_list:
+            if title in comic['标题']:
+                translated_tags = []
+                for key, value in tag_cn_dict.items():
+                    if key in tag:
+                        translated_tags.append(value)
+                if translated_tags:
+                    comic['标签'] = translated_tags
+                break
+        else:
+            comic['标签'] = []
+    return comic_list
 
 def sort_comics_by_release_month(comic_dict, comics = True):
     # 将字典转换为列表，并提取发行月份和作品列表
