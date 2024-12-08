@@ -260,20 +260,19 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
                                 break
                             if not strong or strong.find_parent('div', class_='info') != info:
                                 break
-
             
             result_dict[i+1] = {
                 '杂志名称': mag.title,
                 '杂志封面': mag.cover,
                 '连载月号': mag.mag_volume,
                 '连载作品': [
-                    {
-                        '标题': comic.title,
-                        '作者': comic.author,
-                        '标签': comic.tags
-                    } 
-                    for comic in mag.comics
-                ]
+                        {
+                            '标题': comic.title,
+                            '作者': comic.author,
+                            '标签': comic.tags
+                        } 
+                        for comic in mag.comics
+                    ]
                 }
     return result_dict
 
