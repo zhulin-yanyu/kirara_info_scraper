@@ -6,6 +6,7 @@ import time
 import json
 import re
 
+from data import *
 
 re_kan = re.compile(r'(\d)巻') # 卷数
 re_date = re.compile(r'(\d{4})年(\d{1,2})月(\d{1,2})日')
@@ -23,7 +24,8 @@ def search_old_comics(range_min:int, range_max:int):
     url_list = [f'{base_url}{i}' for i in range(range_min, range_max+1)]
     result_dict = dict()
 
-    for url in url_list[::-1]:
+    for i in range(len(url_list)-1, -1, -1):
+        url = url_list[i]
         resp = get_jp(url)
         if resp:
             resp_text = resp.text
@@ -37,18 +39,20 @@ def search_old_comics(range_min:int, range_max:int):
 
                 while next_sibling and next_sibling.name != 'h2':
                     for j in next_sibling.find_all('div', class_='extra'):
+                        comic = Comic()
                         title = j.find('p', class_='r-photo').find('img').attrs['title']
-                        title = title.replace('\u3000', '　')
+                        comic.title = title.replace('\u3000', '　')
                         num_match = re_kan.search(j.find('strong').text)
                         if num_match:
-                            kan_num = num_match.group(1)
-                        author = j.find_all('p')[1].text
-                        date = search_issuance_date(title, kan_num)
+                            comic.volume = num_match.group(1)
+                        comic.author = j.find_all('p')[1].text
+                        comic.date = search_issuance_date(comic)
+                        
                         comics.append({
-                            '标题': title,
-                            '卷数': kan_num,
-                            '作者': author,
-                            '发行日期': date,
+                            '标题': comic.title,
+                            '卷数': comic.volume,
+                            '作者': comic.author,
+                            '发行日期': comic.date,
                         })
                         time.sleep(2) # 设置延时
                     next_sibling = next_sibling.find_next_sibling()
@@ -73,21 +77,24 @@ def search_new_comics():
             comics = list()
 
             for j in monthly[i].find_all('div', class_='item clearfix'):
+                comic = Comic()
                 title = j.find('p', class_='photo').find('img').attrs['title']
-                title = title.replace('\u3000', '　')
+                comic.title = title.replace('\u3000', '　')
                 num_match = re_kan.search(j.find('strong').text)
                 if num_match:
-                    kan_num = num_match.group(1)
-                author = j.find('div', class_='item-right').find_all('p')[0].text
+                    comic.volume = num_match.group(1)
+                comic.author = j.find('div', class_='item-right').find_all('p')[0].text
                 the_date = j.find('div', class_='item-right').find_all('p')[1]
                 date_match = re_date.search(the_date.text)
                 if date_match:
                     y, m, d = date_match.groups()
+                    comic.date = comic.dispose_date(y, m, d)
+                    
                 comics.append({
-                    '标题': title,
-                    '卷数': kan_num,
-                    '作者': author,
-                    '发行日期': f'{y}-{m}-{d}', # 日期格式：yyyy-mm-dd
+                    '标题': comic.title,
+                    '卷数': comic.volume,
+                    '作者': comic.author,
+                    '发行日期': comic.date, # 日期格式：yyyy-mm-dd
                 })
             result_dict[i+1] = {
                 '发行月份': month,
@@ -95,7 +102,7 @@ def search_new_comics():
             }
     return result_dict
 
-def search_issuance_date(title, kan_num):
+def search_issuance_date(comic:Comic):
     # 搜索最新卷的发行日期
     base_url = 'https://houbunsha.co.jp/comics/detail.php?p='
     date = None
@@ -106,47 +113,13 @@ def search_issuance_date(title, kan_num):
     full_width_dict.update({chr(i): chr(i + 0xFEE0) for i in range(0x61, 0x7B)})  # 小写字母
 
     # 添加其他常用标点符号
-    punctuation_half_to_full = {
-        ' ': '　',
-        '!': '！',
-        '"': '＂',
-        '#': '＃',
-        '$': '＄',
-        '%': '％',
-        '&': '＆',
-        '\'': '＇',
-        '(': '（',
-        ')': '）',
-        '*': '＊',
-        '+': '＋',
-        ',': '，',
-        '.': '．',
-        '/': '／',
-        ':': '：',
-        ';': '；',
-        '<': '＜',
-        '=': '＝',
-        '>': '＞',
-        '?': '？',
-        '@': '＠',
-        '[': '［',
-        '\\': '＼',
-        ']': '］',
-        '^': '＾',
-        '_': '＿',
-        '`': '｀',
-        '{': '｛',
-        '|': '｜',
-        '}': '｝',
-        '~': '～',
-        '-': '−',
-    }
+    
 
     full_width_dict.update(punctuation_half_to_full)
 
     # 替换半角字符为全角字符
-    if re.match(r'!\w', title):
-        title = title.replace('!', '! ')
+    if re.match(r'!\w', comic.title):
+        title = comic.title.replace('!', '! ')
     title = title.replace('!', '！　')
     title = ''.join(full_width_dict.get(char, char) for char in title)
     encoded_title = quote(title, encoding='EUC-JP')
@@ -159,11 +132,11 @@ def search_issuance_date(title, kan_num):
 
         for i in dd:
             num = re_kan.search(i.find('span').text)
-            if num and kan_num and num.group(1) == kan_num:
+            if num and comic.volume and num.group(1) == comic.volume:
                 date_match = re.search(r'(\d{4})/(\d{1,2})/(\d{1,2})', i.text)
                 if date_match:
                     y, m, d = date_match.groups()
-                    date = f'{y}-{m}-{d}' # 日期格式：yyyy-mm-dd
+                    comic.date = comic.dispose_date(y, m, d) # 日期格式：yyyy-mm-dd
                     return date
             else:
                 continue
@@ -175,8 +148,10 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
     old_magazines_of_year = 'backnumber/index.php?y='
     result_dict = dict()
     urls = list()
-    magazines = magazines if isinstance(magazines, list) else [magazines] # 转换成列表
+    magazines = magazines if isinstance(magazines, list) else [magazines] # 字符串就转换成列表
 
+    # 处理为URL列表
+    #TODO: 因为 mid 是按照4(5)份杂志发售顺序排的，实际处理比较复杂。简单来说越往前越乱，不好爬
     if year:
         year = year if '20' in year else f'20{year}'
         for m in magazines:
@@ -191,29 +166,50 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
                     photo = j.find_all('p', class_='r-photo')
                     a_href = [f'{base_url}/magazine/{m}/{k.find('a').attrs['href'].replace('..', '')}' for k in photo]
                     urls.extend(a_href)
-
-
     else:
         urls = [f'{base_url}/magazine/{m}/' for m in magazines]
+
 
     for i in range(len(urls)):
         resp = get_jp(urls[i])
         if resp:
             resp_text = resp.text
             bs = BeautifulSoup(resp_text, 'html.parser')
-
+            mag = Magazine()
             photo = bs.find('div', class_='photo')
             img = photo.find('img') # 杂志封面 # type: ignore
-            magazine_name = img.attrs['alt'] # 杂志名称 # type: ignore
+            mag.title = img.attrs['alt'] # 杂志名称 # type: ignore
             img_src = img.attrs['src'] # type: ignore
+            mag.cover = f'{base_url}{img_src}'
+
 
             month_match = re.search(r'.*?(\d{2})(\d{2}).*?', img_src)
             if month_match:
                 y, m = month_match.groups()
-            monthly = f'20{y}年{m}月号' # 杂志月号
+            mag.mag_volume =  mag.dispose_volume(y, m)
 
-            comics_msg = photo.find('ul', class_='lineup') # type: ignore
-            comics = comics_msg.find_all('li') # type: ignore
+            comics_info = photo.find('ul', class_='lineup') # type: ignore
+            comics = comics_info.find_all('li') # type: ignore
+            # 获取左侧的漫画信息
+            if comics:
+                for item in comics:
+                    comic = Comic()
+                    text = item.get_text()
+                    title_match = re.search(r'(.+)[「|『](.+)[」|』]', text)
+                    if title_match:
+                        comic.title = title_match.group(2)
+                        comic.author = title_match.group(1)
+                        mag.put_comic(comic)
+            else:
+                comics = comics_info.find_all('font', color='#8000FF') # type: ignore
+                if comics:
+                    for item in comics:
+                        comic = Comic()
+                        comic.author = item.parent.previous_sibling.text.strip() if item.parent.previous_sibling.text.strip() != '' else item.previous_sibling.text.strip()
+                        title_match = re.search(r'[「|『](.+)[」|』]', item.text)
+                        if title_match:
+                            comic.title = title_match.group(1)
+                            mag.put_comic(comic)
 
             # 获取右侧的细致信息
             info = photo.find_next_sibling('div', class_='info') # type: ignore
@@ -229,7 +225,7 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
                             if strong.name == 'strong' and '◆' not in strong.text:
                                 title_match = re.search(r'[「|『](.+)[」|』]', strong.text)
                                 title = title_match.group(1) # type: ignore
-                                info_comics.append((tags, title))
+                                mag.put_tags_by_magazine(tags, title)
                             try:
                                 next_sibling_str = strong.next_sibling.get_text(strip=True)
                             except:
@@ -258,70 +254,28 @@ def get_comics_in_magazine(magazines:list|str, year:str = ''):
                             if strong.name == 'strong':
                                 title_match = re.search(r'[「|『](.+)[」|』]', strong.text)
                                 title = title_match.group(1) # type: ignore
-                                info_comics.append((tags, title))
+                                mag.put_tags_by_magazine(tags, title)
                             strong = strong.find_next()
                             if strong.name == 'u':
                                 break
                             if not strong or strong.find_parent('div', class_='info') != info:
                                 break
 
-            comic_list = list()
-            if comics:
-                for item in comics:
-                    text = item.get_text()
-                    title_match = re.search(r'(.+)[「|『](.+)[」|』]', text)
-                    if title_match:
-                        author = title_match.group(1)
-                        title = title_match.group(2)
-                        comic_list.append({
-                            '标题': title,
-                            '作者': author
-                        })
-            else:
-                comics = comics_msg.find_all('font', color='#8000FF') # type: ignore
-                if comics:
-                    for item in comics:
-                        author = item.parent.previous_sibling.text.strip() if item.parent.previous_sibling.text.strip() != '' else item.previous_sibling.text.strip()
-                        title_match = re.search(r'[「|『](.+)[」|』]', item.text)
-                        if title_match:
-                            title = title_match.group(1)
-                            comic_list.append({
-                                '标题': title,
-                                '作者': author
-                            })
-
-            comic_list = put_tags_by_magazine(comic_list, info_comics)
+            
             result_dict[i+1] = {
-                '杂志名称': magazine_name,
-                '杂志封面': f'{base_url}{img_src}',
-                '连载月号': monthly,
-                '连载作品': comic_list
+                '杂志名称': mag.title,
+                '杂志封面': mag.cover,
+                '连载月号': mag.mag_volume,
+                '连载作品': [
+                    {
+                        '标题': comic.title,
+                        '作者': comic.author,
+                        '标签': comic.tags
+                    } 
+                    for comic in mag.comics
+                ]
                 }
     return result_dict
-
-def put_tags_by_magazine(comic_list, tag_list):
-    # 处理杂志的刊载信息，为作品打上标签
-    tag_cn_dict = {
-        '表紙': '封面',
-        '巻頭カラー': '卷头彩页',
-        'ゲスト': '客串',
-        '読み切り': '读切',
-        'センターカラー': '卷中彩页'
-        }
-
-    for comic in comic_list:
-        for tag, title in tag_list:
-            if title in comic['标题']:
-                translated_tags = []
-                for key, value in tag_cn_dict.items():
-                    if key in tag:
-                        translated_tags.append(value)
-                if translated_tags:
-                    comic['标签'] = translated_tags
-                break
-        else:
-            comic['标签'] = []
-    return comic_list
 
 def sort_comics_by_release_month(comic_dict, comics = True):
     # 将字典转换为列表，并提取发行月份和作品列表
